@@ -1,0 +1,123 @@
+# Bronze CDC ingestion — SparkApplication CRD
+#
+# Managed by spark-on-k8s-operator in the `processing` namespace.
+# restartPolicy: Always — the operator restarts the driver if it exits for
+# any reason. This makes the streaming job self-healing without Airflow or KEDA.
+#
+# Dynamic allocation: min 1 executor (always warm), max 3 (= Kafka partition count).
+# Adding a 4th executor would get no Kafka partitions assigned and sit idle.
+#
+# Apply:
+#   kubectl apply -f pipelines/spark/applications/bronze-streaming.yaml
+#
+# Monitor:
+#   kubectl get sparkapplication -n processing
+#   kubectl logs bronze-cdc-ingestion-<uuid>-driver -n processing -f
+
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: bronze-cdc-ingestion
+  namespace: processing
+spec:
+  type: Python
+  mode: cluster
+  pythonVersion: "3"
+
+  # Built with pipelines/spark/docker/Dockerfile
+  # Push: docker build + docker push registry.localhost:5000/spark-bronze:latest
+  image: registry.localhost:5000/spark-bronze:latest
+  imagePullPolicy: IfNotPresent
+
+  mainApplicationFile: local:///app/bronze_ingest.py
+
+  sparkVersion: "3.5.0"
+
+  restartPolicy:
+    type: Always
+    onFailureRetries: 10
+    onFailureRetryInterval: 30       # seconds between retries after failure
+    onSubmissionFailureRetries: 5
+    onSubmissionFailureRetryInterval: 20
+
+  dynamicAllocation:
+    enabled: true
+    initialExecutors: 1
+    minExecutors: 1    # 1 warm executor — no cold start on first Kafka message
+    maxExecutors: 3    # bounded by Kafka partition count per topic
+
+  driver:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "2g"
+    labels:
+      version: "3.5.0"
+    serviceAccount: spark-operator-spark   # created by the operator Helm chart
+    env:
+      - name: KAFKA_BOOTSTRAP_SERVERS
+        value: kafka.streaming.svc.cluster.local:9092
+      - name: ICEBERG_REST_URI
+        value: http://iceberg-rest-catalog.infrastructure.svc.cluster.local:8181
+      - name: S3_ENDPOINT
+        value: http://minio.infrastructure.svc.cluster.local:9000
+      - name: S3_ACCESS_KEY
+        value: minioadmin
+      - name: S3_SECRET_KEY
+        value: minioadmin
+      - name: CHECKPOINT_LOCATION
+        value: s3a://lakehouse-checkpoints/bronze/
+      - name: TRIGGER_INTERVAL
+        value: "30 seconds"
+      - name: OTEL_SERVICE_NAME
+        value: spark-bronze-ingest
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector.observability.svc.cluster.local:4317
+      - name: OTEL_TRACES_SAMPLER
+        value: parentbased_traceidratio
+      - name: OTEL_TRACES_SAMPLER_ARG
+        value: "0.1"
+
+  executor:
+    cores: 2
+    coreLimit: "2400m"
+    memory: "1g"
+    instances: 1        # initial count — dynamic allocation overrides this
+    labels:
+      version: "3.5.0"
+    env:
+      - name: OTEL_SERVICE_NAME
+        value: spark-bronze-executor
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector.observability.svc.cluster.local:4317
+
+  # Spark configuration passed as --conf flags
+  sparkConf:
+    # Iceberg catalog
+    spark.sql.extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+    spark.sql.catalog.lakehouse: org.apache.iceberg.spark.SparkCatalog
+    spark.sql.catalog.lakehouse.type: rest
+    spark.sql.catalog.lakehouse.uri: http://iceberg-rest-catalog.infrastructure.svc.cluster.local:8181
+    spark.sql.catalog.lakehouse.warehouse: s3://lakehouse-warehouse/
+    spark.sql.catalog.lakehouse.io-impl: org.apache.iceberg.hadoop.HadoopFileIO
+    spark.sql.catalog.lakehouse.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.sql.catalog.lakehouse.s3.path-style-access: "true"
+    # S3A for checkpoints + table data
+    spark.hadoop.fs.s3a.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3a.access.key: minioadmin
+    spark.hadoop.fs.s3a.secret.key: minioadmin
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    # Route s3:// URIs through S3A so Iceberg table locations created with s3:// work.
+    # The REST catalog stores table locations as s3:// (not s3a://); HadoopFileIO
+    # must resolve them via the same S3A implementation.
+    spark.hadoop.fs.s3.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3.access.key: minioadmin
+    spark.hadoop.fs.s3.secret.key: minioadmin
+    spark.hadoop.fs.s3.path.style.access: "true"
+    # Dynamic allocation
+    spark.dynamicAllocation.enabled: "true"
+    spark.dynamicAllocation.shuffleTracking.enabled: "true"
+    spark.dynamicAllocation.minExecutors: "1"
+    spark.dynamicAllocation.maxExecutors: "3"
+    spark.dynamicAllocation.executorIdleTimeout: 60s

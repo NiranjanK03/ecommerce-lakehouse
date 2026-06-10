@@ -1,0 +1,65 @@
+version: 2
+
+models:
+  - name: daily_revenue
+    description: "Daily revenue by product category — delivered orders only."
+    columns:
+      - name: order_date
+        description: "Calendar date of purchase"
+        tests:
+          - not_null
+      - name: category
+        description: "Product category from Silver products table"
+      - name: total_revenue
+        description: "Sum of item prices (excludes freight)"
+        tests:
+          - not_null
+      - name: order_count
+        description: "Distinct orders contributing to revenue"
+        tests:
+          - not_null
+
+  - name: top_sellers
+    description: "Seller GMV, order counts, and delivery performance."
+    columns:
+      - name: seller_id
+        description: "Seller identifier (PK in Silver sellers)"
+        tests:
+          - not_null
+          - unique
+      - name: gmv
+        description: "Gross merchandise value — sum of item prices"
+        tests:
+          - not_null
+      - name: delivery_rate_pct
+        description: "Percentage of orders that reached delivered status"
+
+  - name: review_sentiment_by_state
+    description: "Review score distribution aggregated by Brazilian state."
+    columns:
+      - name: customer_state
+        description: "2-letter Brazilian state code"
+        tests:
+          - not_null
+          - unique
+      - name: review_count
+        description: "Total reviews in this state"
+        tests:
+          - not_null
+      - name: avg_score
+        description: "Mean review score (1.0–5.0)"
+
+  - name: order_funnel
+    description: "Weekly order funnel from created to delivered."
+    columns:
+      - name: order_week
+        description: "ISO week start date (Monday)"
+        tests:
+          - not_null
+          - unique
+      - name: total_created
+        description: "All orders created in this week"
+        tests:
+          - not_null
+      - name: delivery_rate_pct
+        description: "Delivered / total_created as percentage"

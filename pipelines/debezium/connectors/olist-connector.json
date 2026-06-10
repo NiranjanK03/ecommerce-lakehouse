@@ -1,0 +1,36 @@
+{
+  "name": "olist-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+
+    "database.hostname": "postgres-postgresql.infrastructure.svc.cluster.local",
+    "database.port": "5432",
+    "database.user": "olist_user",
+    "database.password": "olist_pass",
+    "database.dbname": "olist",
+
+    "topic.prefix": "olist",
+
+    "table.include.list": "public.orders,public.order_items,public.customers,public.products,public.sellers,public.order_payments,public.order_reviews",
+
+    "plugin.name": "pgoutput",
+
+    "slot.name": "debezium_olist",
+    "publication.name": "debezium_publication",
+    "publication.autocreate.mode": "filtered",
+
+    "snapshot.mode": "initial",
+
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "heartbeat.interval.ms": "5000",
+    "heartbeat.action.query": "UPDATE public.debezium_heartbeat SET last_heartbeat_ts = NOW() WHERE id = 1",
+
+    "decimal.handling.mode": "string",
+    "time.precision.mode": "adaptive",
+    "tombstones.on.delete": "true"
+  }
+}

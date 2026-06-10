@@ -1,0 +1,123 @@
+# Debezium Kafka Connect — Deployment + Service
+#
+# Debezium runs as a Kafka Connect plugin. The `debezium/connect` image is the
+# official Kafka Connect base image with all Debezium source connectors
+# pre-installed (PostgreSQL, MySQL, MongoDB, etc.).
+#
+# How it works:
+#   1. This pod connects to Kafka as a Kafka Connect worker
+#   2. A connector is registered via the REST API (scripts/register-connector.sh)
+#   3. The connector creates a PostgreSQL replication slot (debezium_olist)
+#   4. It reads the WAL and publishes CDC events to Kafka topics
+#
+# Port 8083 is the Kafka Connect REST API — used to register, check, and
+# manage connectors. After port-forward: curl http://localhost:8083/connectors
+#
+# OTel Java agent: same init container pattern as Kafka and Iceberg REST Catalog.
+# Debezium is a JVM process — the agent instruments JDBC connections to Postgres,
+# HTTP calls to the Kafka Connect REST API, and JVM runtime metrics.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debezium-connect
+  namespace: streaming
+  labels:
+    app: debezium-connect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debezium-connect
+  template:
+    metadata:
+      labels:
+        app: debezium-connect
+    spec:
+      initContainers:
+        - name: otel-agent
+          image: registry.localhost:5000/otel-agent:2.4.0
+          command: ["cp", "/javaagent.jar", "/otel/opentelemetry-javaagent.jar"]
+          volumeMounts:
+            - name: otel-agent
+              mountPath: /otel
+      volumes:
+        - name: otel-agent
+          emptyDir: {}
+      containers:
+        - name: debezium-connect
+          image: debezium/connect:2.5
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8083
+              name: rest-api
+          volumeMounts:
+            - name: otel-agent
+              mountPath: /otel
+          env:
+            # Kafka Connect cluster config
+            - name: BOOTSTRAP_SERVERS
+              value: "kafka.streaming.svc.cluster.local:9092"
+            - name: GROUP_ID
+              value: "debezium-connect-cluster"
+            - name: CONFIG_STORAGE_TOPIC
+              value: "debezium.connect.configs"
+            - name: OFFSET_STORAGE_TOPIC
+              value: "debezium.connect.offsets"
+            - name: STATUS_STORAGE_TOPIC
+              value: "debezium.connect.status"
+            # Single replica — all topics use replication factor 1
+            - name: CONFIG_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: OFFSET_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: STATUS_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            # OTel Java agent
+            - name: KAFKA_OPTS
+              value: "-javaagent:/otel/opentelemetry-javaagent.jar"
+            - name: OTEL_SERVICE_NAME
+              value: "debezium-connect"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.observability.svc.cluster.local:4317"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            - name: OTEL_TRACES_SAMPLER
+              value: "parentbased_traceidratio"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          readinessProbe:
+            httpGet:
+              path: /connectors
+              port: 8083
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 20   # allow up to 5 minutes of WAL replay before killing
+          livenessProbe:
+            httpGet:
+              path: /connectors
+              port: 8083
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1Gi
+            limits:
+              cpu: 1
+              memory: 2Gi    # increased from 1Gi — bulk WAL replay of 500k rows needs headroom
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: debezium-connect
+  namespace: streaming
+spec:
+  selector:
+    app: debezium-connect
+  ports:
+    - name: rest-api
+      port: 8083
+      targetPort: 8083
+  type: ClusterIP

@@ -1,0 +1,79 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ─── Java / Scala (Spark jobs) ────────────────────────────────────────────────
+*.class
+*.jar
+*.war
+target/
+.scala_dependencies
+
+# ─── Helm ─────────────────────────────────────────────────────────────────────
+charts/*.tgz
+infrastructure/k8s/helm/charts/*/Chart.lock
+
+# ─── dbt ──────────────────────────────────────────────────────────────────────
+transform/dbt/target/
+transform/dbt/logs/
+transform/dbt/.user.yml
+transform/dbt/dbt_packages/
+
+# ─── Airflow ──────────────────────────────────────────────────────────────────
+pipelines/airflow/logs/
+pipelines/airflow/airflow.db
+
+# ─── Spark ────────────────────────────────────────────────────────────────────
+pipelines/spark/logs/
+derby.log
+metastore_db/
+
+# ─── Port-forward PID files ───────────────────────────────────────────────────
+.pf-pids/
+
+# ─── Dataset CSVs (download from Kaggle — too large for git) ──────────────────
+data/seed/*.csv
+data/olist-raw/
+
+# ─── Secrets — never commit ───────────────────────────────────────────────────
+config/local.yaml
+config/aws.yaml
+config/azure.yaml
+*.secret.yaml
+.env.*
+secrets/
+
+# ─── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ─── IDEs ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+
+# ─── Kubernetes generated files ───────────────────────────────────────────────
+kubeconfig
+*.kubeconfig
+
+# ─── Benchmark raw results (large JSON files — commit only summary.md) ───────
+benchmarks/results/*.json
+
+# ─── Personal learning notes (local only) ────────────────────────────────────
+LEARNING.md
+
+# ─── Internal dev artifacts (session logs, brainstorming specs) ───────────────
+CONTEXT.md
+docs/superpowers/

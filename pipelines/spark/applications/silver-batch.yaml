@@ -1,0 +1,105 @@
+# Silver MERGE INTO — SparkApplication CRD
+#
+# Triggered by Airflow's SparkKubernetesOperator when the IcebergSnapshotSensor
+# detects new Bronze data. Runs as a batch job (not streaming) — starts,
+# processes all new Bronze rows, and exits cleanly.
+#
+# restartPolicy: OnFailure — retry on crash, but don't restart after success.
+# This is the correct policy for batch jobs: streaming jobs use `Always`.
+#
+# SILVER_WATERMARK_TS is injected by Airflow via SparkKubernetesOperator's
+# application_file or env override. Default: 1970-01-01 (full reprocess).
+#
+# Triggered by: pipelines/airflow/dags/silver_gold_pipeline.py
+# Monitor: kubectl get sparkapplication -n processing -w
+
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: silver-ingest
+  namespace: processing
+spec:
+  type: Python
+  mode: cluster
+  pythonVersion: "3"
+
+  image: registry.localhost:5000/spark-bronze:latest   # reuses same image as Bronze
+  imagePullPolicy: IfNotPresent
+
+  mainApplicationFile: local:///app/silver_merge.py
+
+  sparkVersion: "3.5.0"
+
+  restartPolicy:
+    type: OnFailure
+    onFailureRetries: 5
+    onFailureRetryInterval: 30
+
+  dynamicAllocation:
+    enabled: true
+    initialExecutors: 1
+    minExecutors: 1
+    maxExecutors: 4   # Silver is a batch join — more executors = faster MERGE INTO
+
+  driver:
+    cores: 1
+    coreLimit: "1500m"
+    memory: "2g"   # increased from 1g — GC pressure after multiple sequential large MERGE operations
+    serviceAccount: spark-operator-spark
+    env:
+      - name: ICEBERG_REST_URI
+        value: http://iceberg-rest-catalog.infrastructure.svc.cluster.local:8181
+      - name: S3_ENDPOINT
+        value: http://minio.infrastructure.svc.cluster.local:9000
+      - name: S3_ACCESS_KEY
+        value: minioadmin
+      - name: S3_SECRET_KEY
+        value: minioadmin
+      - name: SILVER_WATERMARK_TS
+        value: "1970-01-01T00:00:00"   # Airflow overrides this at runtime
+      - name: OTEL_SERVICE_NAME
+        value: spark-silver-merge
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector.observability.svc.cluster.local:4317
+
+  executor:
+    cores: 2
+    coreLimit: "2500m"
+    memory: "2g"
+    instances: 1
+    env:
+      - name: OTEL_SERVICE_NAME
+        value: spark-silver-executor
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://otel-collector.observability.svc.cluster.local:4317
+
+  sparkConf:
+    spark.sql.extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+    spark.sql.catalog.lakehouse: org.apache.iceberg.spark.SparkCatalog
+    spark.sql.catalog.lakehouse.type: rest
+    spark.sql.catalog.lakehouse.uri: http://iceberg-rest-catalog.infrastructure.svc.cluster.local:8181
+    spark.sql.catalog.lakehouse.warehouse: s3://lakehouse-warehouse/
+    spark.sql.catalog.lakehouse.io-impl: org.apache.iceberg.hadoop.HadoopFileIO
+    spark.sql.catalog.lakehouse.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.sql.catalog.lakehouse.s3.path-style-access: "true"
+    spark.hadoop.fs.s3a.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3a.access.key: minioadmin
+    spark.hadoop.fs.s3a.secret.key: minioadmin
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    # Route s3:// URIs through S3A so Iceberg table locations created with s3:// work.
+    spark.hadoop.fs.s3.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3.access.key: minioadmin
+    spark.hadoop.fs.s3.secret.key: minioadmin
+    spark.hadoop.fs.s3.path.style.access: "true"
+    spark.dynamicAllocation.enabled: "true"
+    spark.dynamicAllocation.shuffleTracking.enabled: "true"
+    spark.dynamicAllocation.minExecutors: "1"
+    spark.dynamicAllocation.maxExecutors: "4"
+    # MERGE INTO requires sort-merge join for large Silver tables
+    spark.sql.join.preferSortMergeJoin: "true"
+    spark.sql.shuffle.partitions: "8"
+    # Write timestamps as Iceberg `timestamp` (no timezone) so StarRocks iceberg_catalog
+    # can read them. Without this Spark writes TIMESTAMPTZ which StarRocks maps to NULL.
+    spark.sql.iceberg.handle-timestamp-without-timezone: "true"

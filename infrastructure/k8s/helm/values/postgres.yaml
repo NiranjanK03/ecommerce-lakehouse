@@ -1,0 +1,65 @@
+# PostgreSQL Helm values — chart: bitnami/postgresql  version: 18.6.6
+#
+# PostgreSQL serves two purposes:
+#   1. Source database for CDC — Debezium reads the WAL from here
+#   2. Catalog backend — Iceberg REST Catalog stores table metadata here
+#      (in a separate `iceberg` database, not `olist`)
+#
+# Critical settings for Debezium CDC:
+#   wal_level = logical
+#     Enables logical replication, which exposes row-level change events.
+#     The default (replica) only tracks enough for streaming replication,
+#     not logical decoding. Without this, Debezium cannot create a
+#     replication slot.
+#
+#   max_replication_slots = 5
+#     Each Debezium connector creates one replication slot. If the slot
+#     is dropped (e.g. connector restart with drop.slot.on.stop=true),
+#     unread WAL accumulates until the slot is recreated or manually removed.
+#     5 slots is generous for local dev.
+#
+#   wal_keep_size = 512
+#     Prevents WAL segments from being removed before Debezium reads them.
+#     If the connector falls behind and this is too small, the slot is
+#     invalidated and the connector must do a full snapshot re-read.
+
+auth:
+  username: olist_user
+  password: olist_pass
+  database: olist
+
+primary:
+  extendedConfiguration: |
+    wal_level = logical
+    max_replication_slots = 5
+    max_wal_senders = 5
+    wal_keep_size = 512
+
+  pgHbaConfiguration: |
+    local   all             all                                     trust
+    host    all             all             127.0.0.1/32            md5
+    host    all             all             0.0.0.0/0               md5
+    host    replication     all             0.0.0.0/0               md5
+
+  initdb:
+    scriptsConfigMap: postgres-init-scripts
+    # Run init scripts as the postgres superuser so that
+    # `ALTER USER olist_user REPLICATION` succeeds.
+    # The olist_user does not have permission to grant itself REPLICATION.
+
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 512Mi
+
+service:
+  type: ClusterIP
+  port: 5432

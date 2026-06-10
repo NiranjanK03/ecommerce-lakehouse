@@ -1,0 +1,71 @@
+# MinIO Helm values — chart: minio/minio  version: 5.4.0
+#
+# Switched from bitnami/minio because Bitnami removed all container images
+# from Docker Hub and registry.bitnami.com does not resolve publicly.
+# The official minio/minio chart uses quay.io/minio/minio which is
+# maintained by MinIO Inc. and is always publicly accessible.
+#
+# deploy:
+#   helm repo add minio https://charts.min.io/
+#   helm upgrade --install minio minio/minio \
+#     --namespace infrastructure \
+#     --version 5.4.0 \
+#     --values infrastructure/k8s/helm/values/minio.yaml \
+#     --wait --timeout 5m
+
+mode: standalone
+
+rootUser: minioadmin
+rootPassword: minioadmin
+
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""   # uses k3s default local-path provisioner
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+service:
+  type: ClusterIP
+  port: "9000"    # S3 API — used by Spark, Iceberg, Debezium
+
+consoleService:
+  type: ClusterIP
+  port: "9001"    # Web UI — browse buckets during development
+
+# Pre-create all buckets on first boot via a post-install MinIO Client job.
+# Iceberg REST Catalog will fail at startup if lakehouse-warehouse does not exist.
+buckets:
+  - name: lakehouse-bronze
+    policy: none
+    purge: false
+  - name: lakehouse-silver
+    policy: none
+    purge: false
+  - name: lakehouse-gold
+    policy: none
+    purge: false
+  - name: lakehouse-checkpoints   # Spark Structured Streaming checkpoints
+    policy: none
+    purge: false
+  - name: lakehouse-warehouse     # Iceberg catalog warehouse root
+    policy: none
+    purge: false
+  - name: lakehouse-traces        # Grafana Tempo trace storage
+    policy: none
+    purge: false
+  - name: lakehouse-starrocks  # StarRocks shared-data storage for Gold MV aggregates
+    policy: none
+    purge: false
+
+ingress:
+  enabled: false
+
+consoleIngress:
+  enabled: false

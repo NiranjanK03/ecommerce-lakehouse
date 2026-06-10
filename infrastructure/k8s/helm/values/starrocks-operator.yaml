@@ -1,0 +1,94 @@
+# StarRocks Kubernetes Operator + StarRocksCluster
+# Chart: starrocks/kube-starrocks  version: 1.11.4
+# StarRocks version: 3.4-latest
+#
+# Shared-data mode: CN pods (stateless) hold no durable data; storage goes to MinIO.
+# BE is disabled; CN replaces it.
+#
+# deploy:
+#   helm repo add starrocks https://starrocks.github.io/starrocks-kubernetes-operator
+#   helm upgrade --install kube-starrocks starrocks/kube-starrocks \
+#     --namespace serving --create-namespace \
+#     --version 1.11.4 \
+#     --values infrastructure/k8s/helm/values/starrocks-operator.yaml \
+#     --timeout 10m
+
+operator:
+  starrocksOperator:
+    enabled: true
+
+starrocks:
+  # componentValues.image.tag sets the default image tag for all components (FE, CN, BE).
+  # Individual specs can override with their own image.tag.
+  componentValues:
+    image:
+      tag: "3.4-latest"
+
+  starrocksCluster:
+    # CN pods required for shared-data mode (CN replaces BE)
+    enabledBe: false
+    enabledCn: true
+
+  # ─── FE: query planning + metadata + MySQL protocol (port 9030) ──────────────
+  starrocksFESpec:
+    replicas: 1
+    image:
+      repository: starrocks/fe-ubuntu
+      tag: "3.4-latest"
+    resources:
+      requests:
+        cpu: "2"
+        memory: 3Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    storageSpec:
+      # Setting name enables persistent storage via PVC (empty = emptyDir which loses data on restart).
+      name: "fe"
+      storageClassName: "local-path"
+      storageSize: 2Gi
+      logStorageClassName: "local-path"
+      logStorageSize: 1Gi
+    feEnvVars:
+      - name: AWS_DEFAULT_REGION
+        value: "us-east-1"
+    config: |
+      LOG_DIR = ${STARROCKS_HOME}/log
+      DATE = "$(date +%Y%m%d-%H%M%S)"
+      JAVA_OPTS="-Dlog4j2.formatMsgNoLookups=true -Xmx2048m -XX:+UseG1GC -Xlog:gc*:${LOG_DIR}/fe.gc.log.$DATE:time"
+      http_port = 8030
+      rpc_port = 9020
+      query_port = 9030
+      edit_log_port = 9010
+      mysql_service_nio_enabled = true
+      sys_log_level = INFO
+      run_mode = shared_data
+      cloud_native_meta_port = 6090
+
+  # ─── BE: disabled (shared-data uses CN instead) ───────────────────────────────
+  starrocksBeSpec:
+    replicas: 0
+
+  # ─── CN: stateless compute pods for shared-data mode ─────────────────────────
+  # CN caches hot data locally; actual data lives in MinIO.
+  starrocksCnSpec:
+    replicas: 1
+    image:
+      repository: starrocks/cn-ubuntu
+      tag: "3.4-latest"
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    storageSpec:
+      name: "cn"
+      storageClassName: "local-path"
+      storageSize: 5Gi    # local disk cache
+      logStorageClassName: "local-path"
+      logStorageSize: 1Gi
+    cnEnvVars:
+      - name: AWS_DEFAULT_REGION
+        value: "us-east-1"

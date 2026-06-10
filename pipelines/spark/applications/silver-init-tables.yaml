@@ -1,0 +1,71 @@
+# One-shot SparkApplication to create Silver Iceberg tables.
+# Run once before the first silver-batch job.
+# Delete after success: kubectl delete sparkapplication silver-init-tables -n processing
+#
+# Monitor:
+#   kubectl get sparkapplication silver-init-tables -n processing -w
+#   kubectl logs silver-init-tables-<uuid>-driver -n processing -f
+
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: silver-init-tables
+  namespace: processing
+spec:
+  type: Python
+  mode: cluster
+  pythonVersion: "3"
+
+  image: registry.localhost:5000/spark-bronze:latest
+  imagePullPolicy: IfNotPresent
+
+  mainApplicationFile: local:///app/silver_init_tables.py
+
+  sparkVersion: "3.5.0"
+
+  restartPolicy:
+    type: Never   # one-shot: don't retry on failure, don't restart after success
+
+  driver:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "1g"
+    serviceAccount: spark-operator-spark
+    env:
+      - name: ICEBERG_REST_URI
+        value: http://iceberg-rest-catalog.infrastructure.svc.cluster.local:8181
+      - name: S3_ENDPOINT
+        value: http://minio.infrastructure.svc.cluster.local:9000
+      - name: S3_ACCESS_KEY
+        value: minioadmin
+      - name: S3_SECRET_KEY
+        value: minioadmin
+
+  executor:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "1g"
+    instances: 1
+
+  sparkConf:
+    spark.sql.extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+    spark.sql.catalog.lakehouse: org.apache.iceberg.spark.SparkCatalog
+    spark.sql.catalog.lakehouse.type: rest
+    spark.sql.catalog.lakehouse.uri: http://iceberg-rest-catalog.infrastructure.svc.cluster.local:8181
+    spark.sql.catalog.lakehouse.warehouse: s3://lakehouse-warehouse/
+    spark.sql.catalog.lakehouse.io-impl: org.apache.iceberg.hadoop.HadoopFileIO
+    spark.sql.catalog.lakehouse.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.sql.catalog.lakehouse.s3.path-style-access: "true"
+    spark.hadoop.fs.s3a.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3a.access.key: minioadmin
+    spark.hadoop.fs.s3a.secret.key: minioadmin
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3.access.key: minioadmin
+    spark.hadoop.fs.s3.secret.key: minioadmin
+    spark.hadoop.fs.s3.path.style.access: "true"
+    # Write timestamps as Iceberg `timestamp` (no timezone) so StarRocks iceberg_catalog
+    # can read them. Without this Spark writes TIMESTAMPTZ which StarRocks maps to NULL.
+    spark.sql.iceberg.handle-timestamp-without-timezone: "true"

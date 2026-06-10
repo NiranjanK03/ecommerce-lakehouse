@@ -1,0 +1,62 @@
+# Kubernetes namespaces — one per architectural layer.
+#
+# Why not the default namespace?
+#   1. `kubectl get pods` in default is empty → you always know which layer
+#      you're looking at.
+#   2. RBAC: Airflow's service account can be scoped to orchestration only.
+#   3. NetworkPolicy: processing pods can be blocked from reaching infrastructure
+#      directly (they must go through the catalog API).
+#   4. Resource quotas: cap CPU/RAM per layer independently.
+#
+# Namespace names are intentionally short — no "lakehouse-" prefix — because
+# every kubectl command in this repo targets exactly one of these namespaces
+# and the prefix would be redundant noise.
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: infrastructure
+  labels:
+    project: ecommerce-lakehouse
+    layer: infrastructure
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: streaming
+  labels:
+    project: ecommerce-lakehouse
+    layer: streaming
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: processing
+  labels:
+    project: ecommerce-lakehouse
+    layer: processing
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orchestration
+  labels:
+    project: ecommerce-lakehouse
+    layer: orchestration
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: serving
+  labels:
+    project: ecommerce-lakehouse
+    layer: serving
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    project: ecommerce-lakehouse
+    layer: observability

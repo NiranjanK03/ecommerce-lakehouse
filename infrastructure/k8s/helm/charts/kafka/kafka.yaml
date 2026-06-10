@@ -1,0 +1,252 @@
+# Kafka — apache/kafka:4.0.0 in KRaft mode (no ZooKeeper)
+#
+# Why custom manifest instead of Bitnami chart?
+#   Bitnami removed all container images from Docker Hub and their private
+#   registry (registry.bitnami.com) does not resolve publicly. The official
+#   Apache Kafka image on Docker Hub (apache/kafka:4.0.0) is the authoritative
+#   source and is always publicly accessible. See ADR-004-kafka.md.
+#
+# KRaft mode:
+#   Kafka 4.0 runs without ZooKeeper by default. The combined mode
+#   (process.roles=broker,controller) runs both roles in a single process —
+#   appropriate for a single-node local dev setup.
+#
+# Storage init:
+#   KRaft requires the log directory to be formatted with a cluster ID before
+#   first start. The init container runs kafka-storage.sh format once; the
+#   --ignore-formatted flag makes it idempotent (no-op on restart).
+#
+# Topic provisioning:
+#   A post-start Job creates the 7 CDC topics with explicit retention settings
+#   so Debezium topics are consistent across cluster restarts.
+#
+# OTel Java agent:
+#   Copied from registry.localhost:5000/otel-agent:2.4.0 into an
+#   emptyDir volume. JAVA_TOOL_OPTIONS is picked up by the JVM before any
+#   application code runs. If the OTel Collector is not yet deployed (Phase 1),
+#   the agent logs errors but Kafka still starts normally.
+#
+# deploy:
+#   kubectl apply -f infrastructure/k8s/helm/charts/kafka/kafka.yaml
+#   kubectl rollout status statefulset/kafka -n streaming --timeout=3m
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  namespace: streaming
+data:
+  server.properties: |
+    # KRaft combined mode — broker + controller in one process
+    node.id=1
+    process.roles=broker,controller
+    controller.quorum.voters=1@localhost:9093
+
+    # Listeners
+    # PLAINTEXT:  in-cluster traffic (Debezium → Kafka → Spark)
+    # CONTROLLER: KRaft internal quorum (localhost only)
+    listeners=PLAINTEXT://:9092,CONTROLLER://:9093
+    advertised.listeners=PLAINTEXT://kafka.streaming.svc.cluster.local:9092
+    inter.broker.listener.name=PLAINTEXT
+    controller.listener.names=CONTROLLER
+    listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+
+    # Storage
+    log.dirs=/var/kafka/data
+
+    # Single-replica settings — required for a 1-broker cluster
+    offsets.topic.replication.factor=1
+    transaction.state.log.replication.factor=1
+    transaction.state.log.min.isr=1
+    default.replication.factor=1
+    min.insync.replicas=1
+
+    # Retain CDC events for 24 h locally (default 7 days fills disk fast)
+    log.retention.hours=24
+    log.retention.bytes=1073741824
+    auto.create.topics.enable=true
+    num.partitions=3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: streaming
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+    - name: controller
+      port: 9093
+      targetPort: 9093
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: streaming
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      initContainers:
+        # Step 1: copy OTel Java agent jar into a shared emptyDir volume
+        - name: otel-agent
+          image: registry.localhost:5000/otel-agent:2.4.0
+          command: ["cp", "/javaagent.jar", "/otel/opentelemetry-javaagent.jar"]
+          volumeMounts:
+            - name: otel-agent
+              mountPath: /otel
+
+        # Step 2: format the KRaft log directory (idempotent — safe on restart)
+        - name: format-storage
+          image: apache/kafka:4.0.0
+          command:
+            - /bin/bash
+            - -c
+            - |
+              /opt/kafka/bin/kafka-storage.sh format \
+                --cluster-id $(/opt/kafka/bin/kafka-storage.sh random-uuid) \
+                --config /opt/kafka/config/kraft/server.properties \
+                --ignore-formatted
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/kafka/data
+            - name: kafka-config
+              mountPath: /opt/kafka/config/kraft/server.properties
+              subPath: server.properties
+
+      containers:
+        - name: kafka
+          image: apache/kafka:4.0.0
+          command:
+            - /opt/kafka/bin/kafka-server-start.sh
+            - /opt/kafka/config/kraft/server.properties
+          env:
+            # Bound the JVM heap so Kafka stays within the 1Gi container limit.
+            # Without this, the JVM auto-sizes to ~25% of container memory which
+            # combined with off-heap (OS page cache, direct buffers) exceeds the limit.
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xmx512m -Xms256m"
+            - name: JAVA_TOOL_OPTIONS
+              value: "-javaagent:/otel/opentelemetry-javaagent.jar"
+            - name: OTEL_SERVICE_NAME
+              value: "kafka"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.observability.svc.cluster.local:4317"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            - name: OTEL_METRICS_EXPORTER
+              value: "otlp"
+            - name: OTEL_TRACES_SAMPLER
+              value: "parentbased_traceidratio"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          ports:
+            - containerPort: 9092
+              name: broker
+            - containerPort: 9093
+              name: controller
+          resources:
+            requests:
+              cpu: 300m
+              memory: 512Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/kafka/data
+            - name: kafka-config
+              mountPath: /opt/kafka/config/kraft/server.properties
+              subPath: server.properties
+            - name: otel-agent
+              mountPath: /otel
+
+      volumes:
+        - name: kafka-config
+          configMap:
+            name: kafka-config
+        - name: otel-agent
+          emptyDir: {}
+
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+# Topic provisioning Job — creates the 7 CDC topics with explicit retention.
+# Debezium publishes to: olist.public.<table>
+# Job is idempotent: kafka-topics.sh --create --if-not-exists
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-provision-topics
+  namespace: streaming
+  annotations:
+    # Re-run by deleting this job: kubectl delete job kafka-provision-topics -n streaming
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: provision
+          image: apache/kafka:4.0.0
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              BOOTSTRAP="kafka.streaming.svc.cluster.local:9092"
+              TOPICS=(
+                olist.public.orders
+                olist.public.order_items
+                olist.public.customers
+                olist.public.products
+                olist.public.sellers
+                olist.public.order_payments
+                olist.public.order_reviews
+              )
+              for topic in "${TOPICS[@]}"; do
+                /opt/kafka/bin/kafka-topics.sh \
+                  --bootstrap-server "$BOOTSTRAP" \
+                  --create \
+                  --if-not-exists \
+                  --topic "$topic" \
+                  --partitions 3 \
+                  --replication-factor 1 \
+                  --config retention.ms=604800000 \
+                  --config cleanup.policy=delete
+                echo "Topic ready: $topic"
+              done

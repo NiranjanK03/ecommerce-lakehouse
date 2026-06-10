@@ -1,0 +1,138 @@
+# Apache Airflow — chart: apache-airflow/airflow  version: 1.14.0
+#
+# Orchestrates the Silver → Gold pipeline. Key design decisions:
+#
+# KubernetesExecutor:
+#   Each Airflow task runs as an isolated Kubernetes pod. When the task
+#   finishes the pod is deleted. This means no persistent worker processes
+#   consuming memory between DAG runs — important on a 16 GB k3d cluster
+#   running Spark, Kafka, StarRocks, and MinIO simultaneously.
+#
+# PostgreSQL metadata DB:
+#   Reuses the existing PostgreSQL instance in the infrastructure namespace
+#   with a separate `airflow` database. Avoids deploying another stateful
+#   service. In production you would use a dedicated RDS instance.
+#
+# DAGs from PVC:
+#   DAG files are stored in a PVC backed by the k3s local-path provisioner.
+#   The Makefile's `make sync-dags` copies files from pipelines/airflow/dags/
+#   into the PVC via kubectl cp. No gitSync dependency for local dev.
+#
+# deploy:
+#   helm repo add apache-airflow https://airflow.apache.org
+#   helm upgrade --install airflow apache-airflow/airflow \
+#     --namespace orchestration \
+#     --version 1.14.0 \
+#     --values infrastructure/k8s/helm/values/airflow.yaml \
+#     --wait --timeout 10m
+
+executor: KubernetesExecutor
+
+# ─── Metadata database ─────────────────────────────────────────────────────────
+# Reuse existing PostgreSQL. The `airflow` database must be created manually:
+#   kubectl exec -n infrastructure postgres-postgresql-0 -- \
+#     psql -U olist_user -d postgres -c "CREATE DATABASE airflow;"
+data:
+  metadataConnection:
+    user: olist_user
+    pass: olist_pass
+    host: postgres-postgresql.infrastructure.svc.cluster.local
+    port: 5432
+    db: airflow
+    protocol: postgresql
+
+# ─── Webserver ─────────────────────────────────────────────────────────────────
+webserver:
+  defaultUser:
+    enabled: true
+    role: Admin
+    username: admin
+    email: admin@lakehouse.local
+    firstName: Admin
+    lastName: User
+    password: lakehouse-local
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+  service:
+    type: ClusterIP
+
+# ─── Scheduler ─────────────────────────────────────────────────────────────────
+scheduler:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+# ─── DAGs ──────────────────────────────────────────────────────────────────────
+dags:
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: ""   # k3s local-path
+    accessMode: ReadWriteOnce
+  gitSync:
+    enabled: false   # we use kubectl cp via Makefile instead
+
+# ─── Plugins ───────────────────────────────────────────────────────────────────
+# IcebergSnapshotSensor is deployed as a plugin file.
+# Synced to the pod via the same PVC pattern as DAGs (make sync-plugins).
+plugins:
+  persistence:
+    enabled: true
+    size: 500Mi
+    storageClassName: ""
+
+# ─── Extra pip packages ────────────────────────────────────────────────────────
+# Installed at pod startup by the official image entrypoint.
+# Keep this list small — large installs slow down task pod startup.
+_airflow_local_settings: ""
+
+extraPipPackages:
+  - apache-airflow-providers-cncf-kubernetes==8.3.3   # SparkKubernetesOperator
+  - requests==2.31.0                                   # IcebergSnapshotSensor HTTP calls
+  - pyiceberg==0.7.1                                   # optional richer catalog interaction
+
+# ─── KubernetesExecutor pod template ──────────────────────────────────────────
+# All task pods run in the orchestration namespace with the same pip packages.
+workers:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ─── Logging ───────────────────────────────────────────────────────────────────
+# local-path provisioner only supports RWO; log PVC needs RWX (multiple pods read it).
+# For local dev, disable persistence — logs live in pod ephemeral storage.
+logs:
+  persistence:
+    enabled: false
+
+# ─── Disable components not needed locally ─────────────────────────────────────
+redis:
+  enabled: false   # not needed for KubernetesExecutor
+
+flower:
+  enabled: false
+
+# Disable the bundled PostgreSQL sub-chart — we reuse the infrastructure namespace
+# PostgreSQL instance with a dedicated `airflow` database instead.
+postgresql:
+  enabled: false
+
+triggerer:
+  enabled: true   # required for deferrable operators (IcebergSnapshotSensor uses it)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi

@@ -1,0 +1,157 @@
+# Kafka Helm values — chart: bitnami/kafka  version: 32.4.3
+#
+# Kafka is the event bus between Debezium (CDC source) and the Bronze ingestion
+# Spark Streaming job. It must be running before Debezium is deployed.
+#
+# Why Bitnami Kafka over Strimzi?
+#   Strimzi is the production-grade Kafka operator for Kubernetes, but it has
+#   a 3–5 minute install time (CRD registration, operator readiness) and its
+#   KafkaCluster CR has ~300 lines of config. For a portfolio project the added
+#   complexity obscures the data engineering story.
+#   Bitnami's chart deploys a single StatefulSet that is up in 60 seconds and
+#   needs ~20 lines of values. See docs/architecture/decisions/ADR-004-kafka.md
+#
+# replicaCount: 1
+#   Single broker is adequate locally. Scale to 3 for HA (identical values,
+#   different count).
+#
+# kraft mode (KIP-500):
+#   KRaft replaces ZooKeeper. Bitnami's chart >= 26.x defaults to KRaft.
+#   One less StatefulSet to manage, ~200 MB less RAM.
+
+replicaCount: 1
+
+global:
+  imageRegistry: registry.localhost:5001
+
+# KRaft (no ZooKeeper) — the only mode in bitnami/kafka >= 30.x / Kafka 4.0.
+# The kraft.enabled key was removed; KRaft is always on.
+
+listeners:
+  # PLAINTEXT listener for in-cluster communication (Debezium → Kafka → Spark)
+  # No TLS for local dev — reduces config surface.
+  client:
+    protocol: PLAINTEXT
+  # EXTERNAL listener for connections from outside the cluster (optional, used
+  # by kafka-console-consumer from host after port-forward)
+  external:
+    protocol: PLAINTEXT
+
+config:
+  # Retain CDC events for 24 hours locally (default is 7 days — fills disk fast
+  # in dev when you're running simulated CDC loads)
+  log.retention.hours: "24"
+  log.retention.bytes: "1073741824"   # 1 GB per partition
+
+  # Single-replica settings — required when replicaCount: 1
+  offsets.topic.replication.factor: "1"
+  transaction.state.log.replication.factor: "1"
+  transaction.state.log.min.isr: "1"
+  default.replication.factor: "1"
+  min.insync.replicas: "1"
+
+  # auto.create.topics: true (default) — Debezium creates per-table topics
+  # automatically. We define them explicitly (see below) for retention control.
+  auto.create.topics.enable: "true"
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 300m
+    memory: 512Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+service:
+  type: ClusterIP
+
+# OTel Java agent — injected via init container so no base image changes needed.
+# The agent JAR is copied from the official OTel image into an emptyDir volume
+# shared with the Kafka container. JAVA_TOOL_OPTIONS is picked up automatically
+# by the JVM before any application code runs.
+# Sampling at 10%: Kafka is high-throughput; tracing every message would flood Tempo.
+initContainers:
+  - name: otel-agent
+    image: registry.localhost:5000/otel-agent:2.4.0
+    command: ["cp", "/javaagent.jar", "/otel/opentelemetry-javaagent.jar"]
+    volumeMounts:
+      - name: otel-agent
+        mountPath: /otel
+
+extraVolumes:
+  - name: otel-agent
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: otel-agent
+    mountPath: /otel
+
+extraEnvVars:
+  - name: JAVA_TOOL_OPTIONS
+    value: "-javaagent:/otel/opentelemetry-javaagent.jar"
+  - name: OTEL_SERVICE_NAME
+    value: "kafka"
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector.observability.svc.cluster.local:4317"
+  - name: OTEL_EXPORTER_OTLP_PROTOCOL
+    value: "grpc"
+  - name: OTEL_METRICS_EXPORTER
+    value: "otlp"
+  - name: OTEL_TRACES_SAMPLER
+    value: "parentbased_traceidratio"
+  - name: OTEL_TRACES_SAMPLER_ARG
+    value: "0.1"
+
+# Pre-create per-table topics with explicit retention.
+# Debezium publishes to: <connector-name>.<schema>.<table>
+# We use connector-name = "olist" so topics become: olist.public.<table>
+provisioning:
+  enabled: true
+  topics:
+    - name: olist.public.orders
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"   # 7 days — allow Bronze job to replay
+        cleanup.policy: delete
+    - name: olist.public.order_items
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+        cleanup.policy: delete
+    - name: olist.public.customers
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+        cleanup.policy: delete
+    - name: olist.public.products
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+        cleanup.policy: delete
+    - name: olist.public.sellers
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+        cleanup.policy: delete
+    - name: olist.public.order_payments
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+        cleanup.policy: delete
+    - name: olist.public.order_reviews
+      partitions: 3
+      replicationFactor: 1
+      config:
+        retention.ms: "604800000"
+        cleanup.policy: delete

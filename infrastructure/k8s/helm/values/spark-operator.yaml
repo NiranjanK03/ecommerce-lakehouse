@@ -1,0 +1,54 @@
+# Spark on Kubernetes Operator — chart: spark-operator/spark-operator  version: 2.5.0
+#
+# The operator watches for SparkApplication CRDs and manages their full
+# lifecycle: submitting to the k8s API, tracking driver/executor pods,
+# handling restartPolicy, and cleaning up completed jobs.
+#
+# Why the operator over plain spark-submit?
+#   spark-submit is a one-shot command. The operator makes Spark jobs
+#   first-class Kubernetes resources — declarative, observable via kubectl,
+#   and manageable with standard k8s tooling (kubectl get sparkapplication).
+#
+# Image changed from docker.io/kubeflow/spark-operator (removed) to
+# ghcr.io/kubeflow/spark-operator/controller which is publicly accessible.
+#
+# deploy:
+#   helm repo add spark-operator https://kubeflow.github.io/spark-operator
+#   helm upgrade --install spark-operator spark-operator/spark-operator \
+#     --namespace processing \
+#     --version 2.5.0 \
+#     --values infrastructure/k8s/helm/values/spark-operator.yaml \
+#     --wait --timeout 3m
+
+spark:
+  # Create spark driver service account in the processing namespace.
+  # Default is `default` namespace — override to match where SparkApplications run.
+  jobNamespaces:
+    - processing
+
+controller:
+  # Watch SparkApplication CRDs in the processing namespace only.
+  # Scoped watching is faster than cluster-wide watching and reduces RBAC scope.
+  jobNamespaces:
+    - processing
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  metrics:
+    # Expose operator metrics for OTel Collector to scrape
+    enable: true
+    port: 10254
+    endpoint: /metrics
+
+webhook:
+  enable: true
+  port: 9443
+
+batchScheduler:
+  enable: false

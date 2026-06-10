@@ -1,0 +1,6 @@
+mysql-connector-python>=8.3.0   # StarRocks MySQL protocol
+trino>=0.328.0                  # Trino Python client
+psycopg2-binary>=2.9.9          # PostgreSQL (e2e benchmark inserts)
+pyyaml>=6.0
+rich>=13.0                      # formatted benchmark output tables
+pytest>=8.0                     # test runner

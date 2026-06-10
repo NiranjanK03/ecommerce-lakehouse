@@ -1,0 +1,58 @@
+# Files excluded from Docker build contexts.
+# Keeps images lean and avoids leaking local-only files into containers.
+
+# ─── Personal learning notes ─────────────────────────────────────────────────
+LEARNING.md
+
+# ─── Docs (not needed at runtime) ────────────────────────────────────────────
+docs/
+README.md
+CLAUDE.md
+CONTEXT.md
+*.md
+
+.claude/
+
+# ─── Local config (injected at runtime via k8s Secrets / env vars) ───────────
+config/
+
+# ─── Git ─────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ─── Python artifacts ─────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ─── dbt ──────────────────────────────────────────────────────────────────────
+transform/dbt/target/
+transform/dbt/logs/
+transform/dbt/dbt_packages/
+
+# ─── Data ─────────────────────────────────────────────────────────────────────
+data/
+
+# ─── Secrets ──────────────────────────────────────────────────────────────────
+*.secret.yaml
+.env
+.env.*
+secrets/
+
+# ─── IDE / OS ─────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+.DS_Store
+*.iml
+
+# ─── Helm (not needed in app images) ─────────────────────────────────────────
+infrastructure/
+scripts/

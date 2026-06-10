@@ -1,0 +1,71 @@
+# postgres_exporter — v0.15.0
+#
+# Exposes PostgreSQL internals as Prometheus metrics on port 9187.
+# The OTel Collector scrapes this endpoint via its prometheus receiver.
+#
+# Key metrics exposed:
+#   pg_replication_slots_active{slot_name="debezium_olist"} — 1 if Debezium
+#     replication slot is active, 0 if it dropped (critical alert target)
+#   pg_stat_user_tables_n_live_tup — row counts per table
+#   pg_stat_activity_count — active connections by state
+#   pg_database_size_bytes — database size growth
+#
+# Deployed in the infrastructure namespace so it can reach PostgreSQL via
+# the internal service FQDN without crossing namespace network boundaries.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: infrastructure
+  labels:
+    app: postgres-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+    spec:
+      containers:
+        - name: postgres-exporter
+          image: prometheuscommunity/postgres-exporter:v0.15.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATA_SOURCE_NAME
+              value: "postgresql://olist_user:olist_pass@postgres-postgresql.infrastructure.svc.cluster.local:5432/olist?sslmode=disable"
+          ports:
+            - name: metrics
+              containerPort: 9187
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 9187
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: infrastructure
+  labels:
+    app: postgres-exporter
+spec:
+  selector:
+    app: postgres-exporter
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: 9187
+  type: ClusterIP

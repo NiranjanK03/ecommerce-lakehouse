@@ -1,0 +1,31 @@
+# Lightweight Bronze table initialisation via Iceberg REST API.
+# Uses Alpine (64 MB RAM) instead of Spark (~2 GB) to avoid OOM on local cluster.
+# The REST API call is idempotent — safe to re-run.
+#
+# Re-run: kubectl delete pod bronze-init-rest -n processing && make init-bronze-tables
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bronze-init-rest
+  namespace: processing
+spec:
+  restartPolicy: Never
+  volumes:
+    - name: script
+      configMap:
+        name: bronze-init-rest-script
+        defaultMode: 0755
+  containers:
+    - name: init
+      image: alpine:3.20
+      command: ["sh", "/scripts/iceberg-init.sh"]
+      resources:
+        requests:
+          cpu: 100m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
+      volumeMounts:
+        - name: script
+          mountPath: /scripts

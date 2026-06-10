@@ -1,0 +1,136 @@
+# Iceberg REST Catalog — Deployment + Service
+#
+# Why a custom Deployment instead of a Helm chart?
+#   The reference implementation (tabulario/iceberg-rest) does not have a
+#   published community Helm chart with broad adoption. The Deployment spec
+#   is 60 lines — a Helm chart wrapping 60 lines would be pure overhead.
+#   If this project adds environment-specific variations (different warehouse
+#   paths per env), wrapping it in a chart becomes worthwhile.
+#
+# Image: tabulario/iceberg-rest:0.10.0
+#   Open-source reference implementation of the Iceberg REST Catalog spec
+#   (Apache Iceberg spec §3.3). Engine-agnostic: Spark, Trino, and PyIceberg
+#   all speak the same REST spec without any code changes per-engine.
+#
+# CATALOG_CATALOG__IMPL = JdbcCatalog
+#   Persists namespace/table entries in PostgreSQL instead of in-memory.
+#   The catalog survives pod restarts. Data files are in MinIO; only metadata
+#   (snapshot manifests, schema history) lives in Postgres.
+#
+# CATALOG_IO__IMPL = S3FileIO
+#   Tells the catalog to read/write Iceberg metadata files using the S3 API,
+#   which MinIO speaks. Switch to AzureFileIO for ADLS (config/azure.yaml).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iceberg-rest-catalog
+  namespace: infrastructure
+  labels:
+    app: iceberg-rest-catalog
+    component: catalog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iceberg-rest-catalog
+  template:
+    metadata:
+      labels:
+        app: iceberg-rest-catalog
+        component: catalog
+    spec:
+      # OTel Java agent init container — same pattern used for all JVM components
+      # in this project. Copies the agent JAR into a shared emptyDir volume so the
+      # main container's JVM can load it without modifying the base image.
+      initContainers:
+        - name: otel-agent
+          image: registry.localhost:5000/otel-agent:2.4.0
+          command: ["cp", "/javaagent.jar", "/otel/opentelemetry-javaagent.jar"]
+          volumeMounts:
+            - name: otel-agent
+              mountPath: /otel
+      volumes:
+        - name: otel-agent
+          emptyDir: {}
+      containers:
+        - name: iceberg-rest-catalog
+          image: tabulario/iceberg-rest:0.10.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8181
+              name: rest
+          volumeMounts:
+            - name: otel-agent
+              mountPath: /otel
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-javaagent:/otel/opentelemetry-javaagent.jar"
+            - name: OTEL_SERVICE_NAME
+              value: "iceberg-rest-catalog"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector.observability.svc.cluster.local:4317"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            - name: OTEL_METRICS_EXPORTER
+              value: "otlp"
+            - name: OTEL_TRACES_SAMPLER
+              value: "parentbased_traceidratio"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            - name: CATALOG_CATALOG__IMPL
+              value: "org.apache.iceberg.jdbc.JdbcCatalog"
+            # JDBC URL points to the same PostgreSQL instance as the Olist source,
+            # but the iceberg catalog metadata is stored in a separate schema
+            # (iceberg_rest_catalog), not the olist database.
+            - name: CATALOG_URI
+              value: "jdbc:postgresql://postgres-postgresql.infrastructure.svc.cluster.local:5432/olist?user=olist_user&password=olist_pass"
+            - name: CATALOG_WAREHOUSE
+              value: "s3://lakehouse-warehouse/"
+            - name: CATALOG_IO__IMPL
+              value: "org.apache.iceberg.aws.s3.S3FileIO"
+            - name: CATALOG_S3_ENDPOINT
+              value: "http://minio.infrastructure.svc.cluster.local:9000"
+            - name: CATALOG_S3_ACCESS__KEY__ID
+              value: "minioadmin"
+            - name: CATALOG_S3_SECRET__ACCESS__KEY
+              value: "minioadmin"
+            - name: CATALOG_S3_PATH__STYLE__ACCESS
+              value: "true"
+            - name: AWS_REGION
+              value: "us-east-1"
+          readinessProbe:
+            httpGet:
+              path: /v1/config
+              port: 8181
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /v1/config
+              port: 8181
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 10   # 10×15s = 150s tolerance for GC pauses during Iceberg commit
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi   # increased from 512Mi — MERGE INTO creates many snapshots concurrently
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iceberg-rest-catalog
+  namespace: infrastructure
+spec:
+  selector:
+    app: iceberg-rest-catalog
+  ports:
+    - name: rest
+      port: 8181
+      targetPort: 8181
+  type: ClusterIP

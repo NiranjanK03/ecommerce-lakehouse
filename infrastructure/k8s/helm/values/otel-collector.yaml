@@ -1,0 +1,102 @@
+# OpenTelemetry Collector — chart: open-telemetry/opentelemetry-collector  version: 0.97.0
+#
+# The OTel Collector is the single ingestion point for all telemetry in the
+# lakehouse. Every component (JVM or Python) sends OTLP to this service.
+# The collector then fans out:
+#   metrics → Prometheus (via remote write)
+#   traces  → Grafana Tempo (via OTLP)
+#
+# Deployed alongside Debezium so JVM components have somewhere to
+# emit to from day one. Prometheus and Tempo are added with the full observability stack.
+#
+# deploy:
+#   helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+#   helm upgrade --install otel-collector open-telemetry/opentelemetry-collector \
+#     --namespace observability \
+#     --version 0.97.0 \
+#     --values infrastructure/k8s/helm/values/otel-collector.yaml \
+#     --wait --timeout 3m
+
+mode: deployment
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: "0.102.0"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+config:
+  receivers:
+    # OTLP receiver — all JVM (Java agent) and Python (SDK) components push here
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+    # Prometheus scrape receiver — for components that only expose /metrics
+    # (MinIO and postgres_exporter don't speak OTLP natively)
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: minio
+            scrape_interval: 15s
+            metrics_path: /minio/v2/metrics/cluster
+            static_configs:
+              - targets: ["minio.infrastructure.svc.cluster.local:9000"]
+          - job_name: postgres-exporter
+            scrape_interval: 15s
+            static_configs:
+              - targets: ["postgres-exporter.infrastructure.svc.cluster.local:9187"]
+
+  processors:
+    # batch: accumulate spans/metrics before exporting — reduces network calls
+    batch:
+      timeout: 5s
+      send_batch_size: 1000
+
+    # memory_limiter: hard cap to prevent OOM if a component misbehaves and
+    # floods the collector with high-cardinality metrics
+    memory_limiter:
+      check_interval: 1s
+      limit_mib: 256
+      spike_limit_mib: 64
+
+  exporters:
+    # Metrics → Prometheus via remote write.
+    # Prometheus is configured to accept remote write (see prometheus.yaml).
+    prometheusremotewrite:
+      endpoint: "http://prometheus-server.observability.svc.cluster.local:9090/api/v1/write"
+      tls:
+        insecure: true
+
+    # Traces → Grafana Tempo.
+    # Tempo stores trace blocks in MinIO (lakehouse-traces bucket).
+    otlp/tempo:
+      endpoint: "http://tempo.observability.svc.cluster.local:4317"
+      tls:
+        insecure: true
+
+    # Debug exporter — logs a summary of received telemetry to collector stdout.
+    # Useful before Prometheus/Tempo are deployed.
+    # Disable in production by removing from the pipelines below.
+    debug:
+      verbosity: basic
+
+  service:
+    pipelines:
+      metrics:
+        receivers: [otlp, prometheus]
+        processors: [memory_limiter, batch]
+        exporters: [prometheusremotewrite, debug]
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlp/tempo, debug]

@@ -1,0 +1,11 @@
+ecommerce_lakehouse:
+  target: local
+  outputs:
+    local:
+      type: starrocks
+      host: "127.0.0.1"
+      port: 9030         # StarRocks MySQL protocol — requires port-forward from FE:9030
+      schema: gold       # StarRocks database where Gold MVs are created
+      username: root
+      password: ""       # no password in local dev
+      connect_timeout: 10

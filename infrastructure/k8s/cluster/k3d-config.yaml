@@ -1,0 +1,75 @@
+# k3d cluster configuration for ecommerce-lakehouse
+#
+# Why k3d?
+#   k3d wraps k3s (a certified lightweight Kubernetes distribution) in Docker
+#   containers. A 4-node cluster (1 server + 3 agents) starts in ~30 seconds
+#   on a laptop and uses ~800 MB RAM idle. It is indistinguishable from a real
+#   k8s cluster from Helm and kubectl's perspective. See ADR-003.
+#
+# Node count rationale — 3 agents mirrors a real 3-AZ cloud deployment:
+#   - MinIO / PostgreSQL → agent-0 (infrastructure namespace)
+#   - Kafka / Debezium   → agent-1 (streaming namespace)
+#   - Spark / Airflow    → agent-2 (processing / orchestration namespaces)
+#   This spreading is optional locally (scheduler will still pack pods) but
+#   it lets us add pod anti-affinity rules that work in prod without changes.
+#
+# Local registry:
+#   Custom images (Spark PySpark jobs, FastAPI agent) are pushed here and
+#   pulled by pods inside the cluster.
+#   Push from Mac host:  docker push localhost:5001/<image>   (host-mapped port)
+#   Pod image reference: registry.localhost:5000/<image>      (internal container port)
+#   The two use the same registry container — just accessed on different ports
+#   from different network contexts (host vs. Docker bridge network).
+#
+# Traefik and servicelb are disabled because:
+#   - We access every service via kubectl port-forward (see scripts/port-forward.sh)
+#   - Traefik adds ~200 MB RAM and TLS cert complexity we don't need locally
+#   - Disabling servicelb prevents the cluster from trying to assign external IPs
+#
+# /tmp/k3dvol host mount:
+#   k3s's built-in local-path StorageProvisioner creates PVC directories under
+#   /var/lib/rancher/k3s/storage inside each node container. Mapping that path
+#   to /tmp/k3dvol on the host makes PVC data inspectable with plain `ls` and
+#   survives pod restarts (but NOT cluster deletion — `make clean` wipes it).
+
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+
+metadata:
+  name: lakehouse
+
+servers: 1
+agents: 3
+
+registries:
+  create:
+    name: registry.localhost
+    host: "0.0.0.0"
+    hostPort: "5001"
+  config: |
+    mirrors:
+      "registry.localhost:5000":
+        endpoint:
+          - http://registry.localhost:5000
+
+volumes:
+  - volume: /tmp/k3dvol:/var/lib/rancher/k3s/storage
+    nodeFilters:
+      - server:*
+      - agent:*
+
+options:
+  k3d:
+    wait: true
+    timeout: "120s"
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+      - arg: --disable=servicelb
+        nodeFilters:
+          - server:*
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

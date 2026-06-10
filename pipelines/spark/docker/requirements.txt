@@ -1,0 +1,13 @@
+# Python dependencies for Spark jobs
+# Baked into the Docker image — no runtime pip install needed
+
+# OTel SDK — for emitting the pipeline.bronze.e2e_latency_seconds histogram
+opentelemetry-api==1.25.0
+opentelemetry-sdk==1.25.0
+opentelemetry-exporter-otlp-proto-grpc==1.25.0
+
+# Config loading
+pyyaml==6.0.1
+
+# Utilities
+python-dateutil==2.9.0
