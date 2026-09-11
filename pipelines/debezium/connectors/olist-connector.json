@@ -19,7 +19,7 @@
     "publication.name": "debezium_publication",
     "publication.autocreate.mode": "filtered",
 
-    "snapshot.mode": "initial",
+    "snapshot.mode": "never",
 
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",
     "key.converter.schemas.enable": "false",

@@ -84,7 +84,7 @@ spec:
             # but the iceberg catalog metadata is stored in a separate schema
             # (iceberg_rest_catalog), not the olist database.
             - name: CATALOG_URI
-              value: "jdbc:postgresql://postgres-postgresql.infrastructure.svc.cluster.local:5432/olist?user=olist_user&password=olist_pass"
+              value: "jdbc:postgresql://postgres-postgresql.infrastructure.svc.cluster.local:5432/olist?user=olist_user&password=olist_pass&tcpKeepAlive=true&socketTimeout=300&connectTimeout=30&loginTimeout=30"
             - name: CATALOG_WAREHOUSE
               value: "s3://lakehouse-warehouse/"
             - name: CATALOG_IO__IMPL

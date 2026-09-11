@@ -274,7 +274,15 @@ def render_analysis(scan_results: list[dict], mv_results: list[dict]) -> str:
 
 # ── Section 6: Methodology ────────────────────────────────────────────────────
 
-def render_methodology(engine_data: dict) -> str:
+def _bronze_row_label(pipeline_data: dict | None) -> str:
+    if pipeline_data:
+        total = pipeline_data.get("bronze_throughput", {}).get("total_rows", 0)
+        if total:
+            return f"~{total:,}"
+    return "~812,000"
+
+
+def render_methodology(engine_data: dict, pipeline_data: dict | None = None) -> str:
     protocol = engine_data.get("protocol", {})
     warmup = protocol.get("warmup_runs", 2)
     timed = protocol.get("timed_runs", 3)
@@ -300,7 +308,7 @@ def render_methodology(engine_data: dict) -> str:
         "| Object storage | MinIO (S3-compatible local equivalent) |",
         "| Hardware | k3d 4-node cluster, Apple M2 Pro, 16 GB RAM |",
         "| Dataset | Brazilian Olist E-Commerce (public, Kaggle) |",
-        "| Bronze rows | ~812,000 across 7 tables |",
+        f"| Bronze rows | {_bronze_row_label(pipeline_data)} across 7 tables |",
         "",
         "**Why geometric mean?** If Q01 is 10× faster and Q05 is 1× faster, "
         "the arithmetic mean reports 5.5× (misleadingly high). "
@@ -391,7 +399,7 @@ def main() -> None:
         render_warm_section(scan_results), "---", "",
         render_mv_section(scan_results, mv_results), "---", "",
         render_analysis(scan_results, mv_results), "---", "",
-        render_methodology(engine_data),
+        render_methodology(engine_data, pipeline_data),
     ]
 
     report_text = "\n".join(sections)

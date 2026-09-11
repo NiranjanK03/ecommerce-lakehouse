@@ -129,7 +129,7 @@ latency = _cdc_ingested_at - (_cdc_source_ts_ms / 1000)
 
 where `_cdc_source_ts_ms` is the PostgreSQL WAL commit timestamp embedded by Debezium in the CDC envelope — not a synthetic timestamp added during ingestion. Infrastructure-level metrics (Kafka consumer lag, Debezium connector lag) cannot compute this because they only see byte offsets, not the original WAL commit time.
 
-P50/P95/P99 are computed with Trino's `approx_percentile` over the full Bronze orders table (~99k rows), which gives statistically meaningful latency distribution without reading all rows into the application tier.
+P50/P95/P99 are computed with Trino's `approx_percentile` over the full Bronze orders table (~900k rows), which gives statistically meaningful latency distribution without reading all rows into the application tier.
 
 ---
 
@@ -139,17 +139,16 @@ Benchmarks run 2026-05-29. Full report: `benchmarks/results/2026-05-29-benchmark
 
 | Metric | Value |
 |--------|-------|
-| Total Bronze rows (7 tables) | 812,193 |
-| Bronze ingestion throughput | 554 rows/s (aggregate over 7 tables, 1,466 s span) |
-| E2E latency P50 (WAL commit → Iceberg write) | 6,825 s ¹ |
-| E2E latency P95 | 6,825 s ¹ |
-| Trino warm geo-mean (5 queries) | 6,720 ms |
-| StarRocks scan warm geo-mean | 246 ms |
-| StarRocks MV warm geo-mean (4 queries) | 34 ms |
-| StarRocks scan speedup vs Trino | 27.4× |
-| StarRocks MV speedup vs Trino | 197.5× |
+| Total Bronze rows (7 tables) | 5,071,289 |
+| Bronze ingestion throughput | 11,406 rows/s (aggregate over 7 tables, 445 s span) |
+| E2E latency P50 (WAL commit → Iceberg write) | 0.02 s ¹ |
+| Trino warm geo-mean (5 queries) | 12,938 ms |
+| StarRocks scan warm geo-mean | 1,318 ms |
+| StarRocks MV warm geo-mean (4 queries) | 47 ms |
+| StarRocks scan speedup vs Trino | 9.8× |
+| StarRocks MV speedup vs Trino | 273.3× |
 
-¹ Batch-loaded historical data: CSVs were loaded into PostgreSQL ~1.9 hours before Debezium + Spark ingested them. In live CDC, P50 would be sub-30 s.
+¹ Bulk-loaded synthetic dataset: source timestamp = ingest timestamp, so latency is near-zero. In live Debezium CDC reading the PostgreSQL WAL in real-time, P50 would be sub-30 s.
 
 ---
 

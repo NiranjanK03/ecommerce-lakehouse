@@ -41,13 +41,16 @@ RUN curl -fsSL -o ${JARS_DIR}/iceberg-spark-runtime-3.5_2.12-1.5.0.jar \
         https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar && \
     curl -fsSL -o ${JARS_DIR}/aws-java-sdk-bundle-1.12.592.jar \
         https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.592/aws-java-sdk-bundle-1.12.592.jar && \
+    curl -fsSL -o ${JARS_DIR}/postgresql-42.7.3.jar \
+        https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.3/postgresql-42.7.3.jar && \
     chmod 644 ${JARS_DIR}/iceberg-spark-runtime-3.5_2.12-1.5.0.jar \
               ${JARS_DIR}/spark-sql-kafka-0-10_2.12-3.5.0.jar \
               ${JARS_DIR}/spark-token-provider-kafka-0-10_2.12-3.5.0.jar \
               ${JARS_DIR}/kafka-clients-3.4.1.jar \
               ${JARS_DIR}/commons-pool2-2.11.1.jar \
               ${JARS_DIR}/hadoop-aws-3.3.4.jar \
-              ${JARS_DIR}/aws-java-sdk-bundle-1.12.592.jar
+              ${JARS_DIR}/aws-java-sdk-bundle-1.12.592.jar \
+              ${JARS_DIR}/postgresql-42.7.3.jar
 
 # ─── Python dependencies ───────────────────────────────────────────────────────
 COPY docker/requirements.txt /tmp/requirements.txt

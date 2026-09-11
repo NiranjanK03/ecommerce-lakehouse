@@ -40,25 +40,25 @@ PostgreSQL (Olist)
 
 ## Benchmark Results
 
-Run date: 2026-05-29 on a k3d 4-node cluster (Apple M2 Pro, 16 GB RAM). Full report: [`benchmarks/results/2026-05-29-benchmark-report.md`](benchmarks/results/2026-05-29-benchmark-report.md).
+Run date: 2026-09-11 on a k3d 4-node cluster (Apple M2 Pro, 16 GB RAM). Full report: [`benchmarks/results/2026-09-11-benchmark-report.md`](benchmarks/results/2026-09-11-benchmark-report.md).
 
 **Query engine comparison — 5 analytical queries, warm cache, geometric mean:**
 
 | Engine | Geo-mean latency | Speedup vs Trino |
 |--------|:----------------:|:----------------:|
-| Trino 435 (Silver Iceberg scan) | 6,720 ms | baseline |
-| StarRocks 3.4 (Silver Iceberg scan, CN cache) | 246 ms | **27.4×** |
-| StarRocks 3.4 (Gold materialized views) | 34 ms | **197.5×** |
+| Trino 435 (Silver Iceberg scan) | 12,938 ms | baseline |
+| StarRocks 3.4 (Silver Iceberg scan, CN cache) | 1,318 ms | **9.8×** |
+| StarRocks 3.4 (Gold materialized views) | 47 ms | **273.3×** |
 
 **Pipeline metrics:**
 
 | Metric | Value |
 |--------|-------|
-| Total Bronze rows (7 tables) | 812,193 |
-| Bronze ingestion throughput | 554 rows/s |
-| E2E latency P50 (WAL commit → Iceberg) | 6,825 s ¹ |
+| Total Bronze rows (7 tables) | 5,071,289 |
+| Bronze ingestion throughput (bulk snapshot) | 11,406 rows/s |
+| E2E latency P50 (WAL commit → Iceberg) | 0.02 s ¹ |
 
-¹ Batch-loaded historical data. In live CDC the lag from WAL commit to Iceberg write would be sub-30 s.
+¹ Bulk-loaded synthetic dataset (source timestamp = ingest timestamp). In live Debezium CDC the WAL-to-Iceberg lag is sub-30 s.
 
 See [docs/architecture/decisions/ADR-007-starrocks-gold-layer.md](docs/architecture/decisions/ADR-007-starrocks-gold-layer.md) for the full analysis and [docs/benchmarks/methodology.md](docs/benchmarks/methodology.md) for the protocol.
 

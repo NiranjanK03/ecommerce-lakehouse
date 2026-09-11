@@ -74,6 +74,12 @@ spec:
             - name: STATUS_STORAGE_REPLICATION_FACTOR
               value: "1"
             # OTel Java agent
+            # Explicit heap sizing: 3g heap leaves 1g for off-heap (metaspace,
+            # direct buffers, OTel agent). Without this the JVM defaults to
+            # 25% of container memory (1g with 4Gi limit) which OOMs during
+            # a 5M-row initial snapshot.
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms1g -Xmx3g"
             - name: KAFKA_OPTS
               value: "-javaagent:/otel/opentelemetry-javaagent.jar"
             - name: OTEL_SERVICE_NAME
@@ -103,10 +109,10 @@ spec:
           resources:
             requests:
               cpu: 300m
-              memory: 1Gi
+              memory: 2Gi
             limits:
               cpu: 1
-              memory: 2Gi    # increased from 1Gi — bulk WAL replay of 500k rows needs headroom
+              memory: 4Gi    # 4Gi for 5M-row initial snapshot; 3Gi heap + 1Gi off-heap
 ---
 apiVersion: v1
 kind: Service

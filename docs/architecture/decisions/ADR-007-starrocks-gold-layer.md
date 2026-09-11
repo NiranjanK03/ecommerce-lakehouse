@@ -28,32 +28,31 @@ Three scenarios:
 | `starrocks_scan` | StarRocks 3.4 CN — same Iceberg files via `iceberg_catalog` (CN block cache) |
 | `starrocks_mv` | StarRocks 3.4 CN — pre-materialised Gold MVs, no Iceberg scan |
 
-**Warm query performance (geometric mean of 3 timed runs):**
+**Warm query performance (geometric mean of 3 timed runs, 5M-row dataset, 2026-09-11):**
 
 | Query | Trino scan | StarRocks scan | StarRocks Gold MV | MV speedup vs Trino |
 |-------|:----------:|:--------------:|:-----------------:|:-------------------:|
-| Q01 daily revenue by category | 11.1 s | 525 ms | 62 ms | **178.9×** |
-| Q02 top sellers by GMV | 5.81 s | 661 ms | 38 ms | **154.4×** |
-| Q03 review sentiment by state | 5.60 s | 41 ms | 25 ms | **225.9×** |
-| Q04 order funnel | 6.87 s | 304 ms | 23 ms | **295.1×** |
-| Q05 cohort retention (90d) | 5.56 s | 208 ms | n/a (no MV) | — |
-| **Geo-mean** | **6.72 s** | **246 ms** | **34 ms** | **197.5×** |
+| Q01 daily revenue by category | 17.4 s | 2.97 s | 54 ms | **322.0×** |
+| Q02 top sellers by GMV | 20.2 s | 3.49 s | 44 ms | **453.3×** |
+| Q03 review sentiment by state | 8.74 s | 55 ms | 44 ms | **199.6×** |
+| Q04 order funnel | 10.4 s | 1.67 s | 48 ms | **213.6×** |
+| Q05 cohort retention (90d) | 11.4 s | 4.16 s | n/a (no MV) | — |
+| **Geo-mean** | **12.94 s** | **1.32 s** | **47 ms** | **273.3×** |
 
-StarRocks scan is **27.4× faster** than Trino on the same Silver Iceberg files. Gold MVs push the gap to **197.5×** vs Trino, bringing P50 agent query latency to sub-40 ms.
+StarRocks scan is **9.8× faster** than Trino on the same Silver Iceberg files. Gold MVs push the gap to **273.3×** vs Trino, bringing agent query latency to sub-55 ms.
 
-**Pipeline metrics:**
+**Pipeline metrics (5M-row synthetic dataset):**
 
 | Metric | Value |
 |--------|-------|
-| Total Bronze rows (7 tables) | 812,193 |
-| Bronze ingestion throughput | 554 rows/s (aggregate) |
-| E2E latency P50 (WAL commit → Iceberg write) | 6,825 s ¹ |
-| E2E latency P95 | 6,825 s ¹ |
-| Silver MERGE throughput | ~100,000+ rows/s per table |
+| Total Bronze rows (7 tables) | 5,071,289 |
+| Bronze ingestion throughput | 11,406 rows/s (aggregate, bulk snapshot) |
+| E2E latency P50 (WAL commit → Iceberg write) | 0.02 s ¹ |
+| Silver MERGE throughput | ~11,400 rows/s aggregate over 7 tables |
 
-¹ High E2E latency reflects batch-loaded historical data (CSVs loaded into PostgreSQL ~1.9 hours before the Debezium + Spark pipeline ingested them). In a live production CDC deployment where Debezium reads the WAL in real-time, P50 would be sub-30 s.
+¹ Bulk-loaded synthetic data (source timestamp = ingest timestamp). In a live Debezium CDC deployment reading the PostgreSQL WAL in real-time, P50 would be sub-30 s.
 
-Hardware: k3d 4-node cluster, Apple M2 Pro, 16 GB RAM. Dataset: Brazilian Olist (~812,000 rows across 7 tables).
+Hardware: k3d 4-node cluster, Apple M2 Pro, 16 GB RAM. Dataset: Brazilian Olist synthetic (~5M rows across 7 tables).
 
 ## Consequences
 

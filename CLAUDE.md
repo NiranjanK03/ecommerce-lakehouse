@@ -54,7 +54,7 @@ capabilities across the full modern data stack with a quantified benchmark.
 ## Dataset
 Brazilian Olist E-Commerce dataset (public, Kaggle).
 Contains: orders, customers, products, sellers, reviews, payments.
-~812,000 rows across 7 tables. Load CSVs into PostgreSQL; Debezium treats it as a live CDC source.
+~5,071,289 synthetic rows across 7 tables (generated from the Olist schema). Load into PostgreSQL; Debezium treats it as a live CDC source.
 
 ---
 

@@ -68,6 +68,10 @@ help:
 	@echo "    make dag-status              Show recent Airflow DAG runs"
 	@echo "    make logs-kafka / logs-minio / logs-catalog"
 	@echo ""
+	@echo "  DATA"
+	@echo "    make load-olist-data         Load original 812k Olist CSVs into PostgreSQL"
+	@echo "    make generate-data           Generate 5M synthetic rows (replaces Olist data)"
+	@echo ""
 	@echo "  RESET"
 	@echo "    make clean                   Delete cluster + all data"
 	@echo ""
@@ -463,6 +467,13 @@ logs-catalog:
 .PHONY: load-olist-data
 load-olist-data:
 	bash scripts/load-olist-data.sh
+
+.PHONY: generate-data
+generate-data:
+	@echo "==> Generating synthetic data (~5M rows, --orders 900000)..."
+	@echo "    Requires: make port-forward (PostgreSQL on localhost:5432)"
+	@echo "    Add --truncate to remove existing Olist data first."
+	python3 scripts/generate_synthetic_data.py --orders 900000 --truncate
 
 # ─── Teardown ─────────────────────────────────────────────────────────────────
 

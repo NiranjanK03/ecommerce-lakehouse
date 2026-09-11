@@ -1,0 +1,82 @@
+# Bronze initial bulk load — SparkApplication CRD
+#
+# Reads all 7 source tables from PostgreSQL via JDBC and writes them
+# to Bronze Iceberg tables in Debezium snapshot event format (op="r").
+#
+# Use this instead of Debezium's built-in snapshot mode when the dataset
+# exceeds ~500k rows. Debezium holds a consistent snapshot transaction open
+# for the full snapshot duration, which OOMs at multi-million-row scale.
+#
+# Run BEFORE registering the Debezium connector with snapshot.mode=no_data.
+#
+# Apply:
+#   kubectl apply -f pipelines/spark/applications/bronze-initial-load.yaml
+# Monitor:
+#   kubectl logs bronze-initial-load-driver -n processing -f
+
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: bronze-initial-load
+  namespace: processing
+spec:
+  type: Python
+  mode: cluster
+  pythonVersion: "3"
+
+  image: registry.localhost:5000/spark-bronze:latest
+  imagePullPolicy: Always
+
+  mainApplicationFile: local:///app/bronze_initial_load.py
+
+  sparkVersion: "3.5.0"
+
+  restartPolicy:
+    type: OnFailure
+    onFailureRetries: 2
+    onFailureRetryInterval: 30
+
+  driver:
+    cores: 1
+    coreLimit: "1000m"
+    memory: "1500m"
+    serviceAccount: spark-operator-spark
+    env:
+      - name: POSTGRES_HOST
+        value: postgres-postgresql.infrastructure.svc.cluster.local
+      - name: POSTGRES_PORT
+        value: "5432"
+      - name: POSTGRES_DB
+        value: olist
+      - name: POSTGRES_USER
+        value: olist_user
+      - name: POSTGRES_PASS
+        value: olist_pass
+
+  executor:
+    cores: 1
+    coreLimit: "1500m"
+    memory: "2g"    # reduced from 3g×4 → 2g×2 to prevent k3d agent node OOM
+    instances: 2
+
+  sparkConf:
+    spark.sql.extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+    spark.sql.catalog.lakehouse: org.apache.iceberg.spark.SparkCatalog
+    spark.sql.catalog.lakehouse.type: rest
+    spark.sql.catalog.lakehouse.uri: http://iceberg-rest-catalog.infrastructure.svc.cluster.local:8181
+    spark.sql.catalog.lakehouse.warehouse: s3://lakehouse-warehouse/
+    spark.sql.catalog.lakehouse.io-impl: org.apache.iceberg.hadoop.HadoopFileIO
+    spark.sql.catalog.lakehouse.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.sql.catalog.lakehouse.s3.path-style-access: "true"
+    spark.hadoop.fs.s3a.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3a.access.key: minioadmin
+    spark.hadoop.fs.s3a.secret.key: minioadmin
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3.impl: org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3.endpoint: http://minio.infrastructure.svc.cluster.local:9000
+    spark.hadoop.fs.s3.access.key: minioadmin
+    spark.hadoop.fs.s3.secret.key: minioadmin
+    spark.hadoop.fs.s3.path.style.access: "true"
+    spark.sql.iceberg.handle-timestamp-without-timezone: "true"
+    spark.sql.shuffle.partitions: "8"
