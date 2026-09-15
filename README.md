@@ -58,7 +58,7 @@ Run date: 2026-09-11 on a k3d 4-node cluster (Apple M2 Pro, 16 GB RAM). Full rep
 | Bronze ingestion throughput (bulk snapshot) | 11,406 rows/s |
 | E2E latency P50 (WAL commit → Iceberg) | 0.02 s ¹ |
 
-¹ Bulk-loaded synthetic dataset (source timestamp = ingest timestamp). In live Debezium CDC the WAL-to-Iceberg lag is sub-30 s.
+¹ Bulk-loaded synthetic dataset (source timestamp = ingest timestamp). In live Debezium CDC with Spark micro-batch running every 30 seconds, WAL-to-Iceberg lag would be well under a minute.
 
 See [docs/architecture/decisions/ADR-007-starrocks-gold-layer.md](docs/architecture/decisions/ADR-007-starrocks-gold-layer.md) for the full analysis and [docs/benchmarks/methodology.md](docs/benchmarks/methodology.md) for the protocol.
 
